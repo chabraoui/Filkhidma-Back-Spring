@@ -1,12 +1,9 @@
 package com.sid.responses;
 
 import java.util.List;
-
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.sid.shared.CategoryName;
 import com.sid.shared.dto.AnnonceDto;
-
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;

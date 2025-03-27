@@ -5,6 +5,7 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import com.sid.entity.CategoryEntity;
 import com.sid.entity.UserEntity;
@@ -37,7 +38,7 @@ public class CatgeoryServiceImpl implements CategoryService {
 		Page<CategoryEntity> categories = categoryRepository.findAll(pageableRequest);
 		List<CategoryEntity> listOfCat = categories.getContent();
 		if (listOfCat.isEmpty())
-			throw new CategoryException(ErrorMessages.CAT_EMPTY.getErrorMessage());
+			throw new CategoryException(ErrorMessages.CAT_EMPTY.getErrorMessage(),HttpStatus.NOT_FOUND);
 		return utils.mapToLists(listOfCat, CategoryDto.class);
 	}
 
@@ -54,7 +55,7 @@ public class CatgeoryServiceImpl implements CategoryService {
 		checkAuth(email);
 		CategoryEntity cat = categoryRepository.findByCategoryName(categoryName);
 		Optional.ofNullable(cat)
-				.orElseThrow(() -> new CategoryException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage()));
+				.orElseThrow(() -> new CategoryException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage(),HttpStatus.NOT_FOUND));
 		categoryRepository.delete(cat);
 	}
 
@@ -73,18 +74,18 @@ public class CatgeoryServiceImpl implements CategoryService {
 	public CategoryDto getCategory(CategoryName categoryName) {
 		CategoryEntity cat = categoryRepository.findByCategoryName(categoryName);
 		Optional.ofNullable(cat)
-				.orElseThrow(() -> new CategoryException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage()));
+				.orElseThrow(() -> new CategoryException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage(),HttpStatus.NOT_FOUND));
 		return utils.mapToDto(cat, CategoryDto.class);
 	}
 
 	private void checkAuth(String email) {
 		UserEntity userEntity = userRepository.findByEmail(email);
 		Optional.ofNullable(userEntity)
-				.orElseThrow(() -> new UserException(ErrorMessages.NO_AUTH_FOUND.getErrorMessage()));
+				.orElseThrow(() -> new UserException(ErrorMessages.NO_AUTH_FOUND.getErrorMessage(),HttpStatus.NOT_FOUND));
 		boolean isAdminOrSuperAdmin = userEntity.getRole().stream()
 				.anyMatch(role -> role.getRoleName().equals(RoleName.SUPER_ADMIN));
 		if (!isAdminOrSuperAdmin) {
-			throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage());
+			throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage(),HttpStatus.FORBIDDEN);
 		}
 	}
 

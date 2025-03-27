@@ -7,16 +7,21 @@ import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
 import com.sid.entity.RoleEntity;
 import com.sid.entity.UserEntity;
 import com.sid.exceptions.UserException;
 import com.sid.repository.RoleRepository;
 import com.sid.repository.UserRepository;
+import com.sid.requests.UpdatePasswordRequest;
 import com.sid.responses.ErrorMessages;
 import com.sid.security.SecurityConstants;
 import com.sid.services.UserService;
@@ -40,27 +45,26 @@ public class UserServiceImpl implements UserService {
 	@Override
 	public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
 		UserEntity userEntity = userRepository.findByEmail(email);
-
 		if (userEntity == null)
 			throw new UsernameNotFoundException(email);
-
-		return new User(userEntity.getEmail(), userEntity.getEncryptePassword(), new ArrayList<>());
+		return new User(userEntity.getEmail(), userEntity.getEncryptePassword(), userEntity.getRole().stream()
+				.map(t -> new SimpleGrantedAuthority(t.getRoleName().name())).collect(Collectors.toList()));
 	}
 
 	@Override
-	public UserDto createUser(UserDto userDto) {
+	public UserDto createUser(UserDto userDto, MultipartFile images) throws Exception {
 		UserEntity searchUserByEmail = userRepository.findByEmail(userDto.getEmail());
 
 		if (searchUserByEmail != null)
-			throw new UserException(ErrorMessages.RECORD_ALREADY_EXISTS.getErrorMessage());
+			throw new UserException(ErrorMessages.RECORD_ALREADY_EXISTS.getErrorMessage(), HttpStatus.CONFLICT);
 		ModelMapper modelMapper = new ModelMapper();
 		UserEntity userEntity = modelMapper.map(userDto, UserEntity.class);
 		userEntity.setEncryptePassword(bCryptPasswordEncoder.encode(userDto.getPassword()));
 		userEntity.setUserId(utils.genereteStringId(32));
+		userEntity.setUserImage(utils.saveImage(images));
 
 		List<RoleEntity> role = new ArrayList<>();
 		String secretKey = userDto.getSecretKey();
-
 		if (secretKey != null && secretKey.equals(SecurityConstants.SUPER_ADMIN_SECRET_KEY)) {
 			RoleEntity superAdminRole = roleRepository.findByRoleName(RoleName.SUPER_ADMIN);
 			RoleEntity userRole = roleRepository.findByRoleName(RoleName.USER);
@@ -100,60 +104,32 @@ public class UserServiceImpl implements UserService {
 		UserEntity userEntity = userRepository.findByEmail(email);
 		if (userEntity == null)
 			throw new UsernameNotFoundException(email);
-		return utils.mapToDto(userEntity, UserDto.class);
+		return utils.getUserDto(userEntity);
 	}
 
 	@Override
 	public UserDto getUserByUserId(String userId) {
 		UserEntity userEntity = userRepository.findByUserId(userId);
 		if (userEntity == null)
-			throw new UserException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage());
+			throw new UserException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage(), HttpStatus.NOT_FOUND);
 		return utils.mapToDto(userEntity, UserDto.class);
 
 	}
 
 	@Override
 	public UserDto updateUser(String userId, UserDto userDto, String email) {
-		UserEntity userEntity = userRepository.findByUserId(userId);
-		if (userEntity == null)
-			throw new UserException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage());
+		UserEntity userEntity = checkUserAuthorization(userId, email);
 
-		// check le email de user authentifié
-		UserEntity userRequester = userRepository.findByEmail(email);
-		if (userRequester == null)
-			throw new UserException(ErrorMessages.NO_AUTH_FOUND.getErrorMessage());
-
-		// Vérification si c'est le créateur de l'annonce
-		boolean isOwner = userEntity.getEmail().equals(email);
-
-		// Si l'utilisateur n'est pas le créateur il ne peut maj l'utilisateur
-		if (!isOwner) {
-			throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage());
+		if (userDto != null) {
+			if (userDto.getFirstName() != null)
+				userEntity.setFirstName(userDto.getFirstName());
+			if (userDto.getLastName() != null)
+				userEntity.setLastName(userDto.getLastName());
+			if (userDto.getTel() != null)
+				userEntity.setTel(userDto.getTel());
 		}
-
-		// Vérification des champs obligatoires
-		if (userDto.getFirstName() == null || userDto.getFirstName().isEmpty())
-			throw new UserException(ErrorMessages.MISSING_REQUIRED_FIELD.getErrorMessage());
-
-		if (userDto.getLastName() == null || userDto.getLastName().isEmpty())
-			throw new UserException(ErrorMessages.MISSING_REQUIRED_FIELD.getErrorMessage());
-
-		// si user entre une nvll image dans la modification, on supprime l'image existe
-		// en server et on persist la nouvelle
-		if (userDto.getUserImage() != null && !userDto.getUserImage().equals(userEntity.getUserImage())) {
-			String oldImageName = userEntity.getUserImage();
-
-			if (oldImageName != null) {
-				utils.setImageDir("/userImage/");
-				Utils.deleteImage(oldImageName);
-			}
-		}
-		userEntity.setUserImage(userDto.getUserImage());
-		userEntity.setFirstName(userDto.getFirstName());
-		userEntity.setLastName(userDto.getLastName());
 		UserEntity userUpdated = userRepository.save(userEntity);
 		return utils.mapToDto(userUpdated, UserDto.class);
-
 	}
 
 	@Override
@@ -162,18 +138,14 @@ public class UserServiceImpl implements UserService {
 		String initialImageDir = utils.getImageDir();
 
 		if (userEntity == null)
-			throw new UserException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage());
+			throw new UserException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage(), HttpStatus.NOT_FOUND);
 
-		// Récupérer l'utilisateur qui fait la requête
 		UserEntity userRequester = userRepository.findByEmail(email);
 		if (userRequester == null)
-			throw new UserException(ErrorMessages.NO_AUTH_FOUND.getErrorMessage());
+			throw new UserException(ErrorMessages.NO_AUTH_FOUND.getErrorMessage(), HttpStatus.NOT_FOUND);
 
-		// Vérification si l'utilisateur authentifié est le même que celui qui tente de
-		// supprimer son compte
 		boolean isOwner = userEntity.getEmail().equals(email);
 
-		// Vérification des rôles de l'utilisateur qui fait la requête
 		boolean isAdmin = userRequester.getRole().stream().anyMatch(role -> role.getRoleName().equals(RoleName.ADMIN));
 
 		boolean isSuperAdmin = userRequester.getRole().stream()
@@ -196,7 +168,7 @@ public class UserServiceImpl implements UserService {
 			// Un Admin peut supprimer uniquement un utilisateur avec le rôle "USER"
 			if (userEntity.getRole().stream().anyMatch(role -> role.getRoleName().equals(RoleName.ADMIN)
 					|| role.getRoleName().equals(RoleName.SUPER_ADMIN))) {
-				throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage());
+				throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage(), HttpStatus.FORBIDDEN);
 			}
 			String imageName = userEntity.getUserImage();
 			if (imageName != null) {
@@ -207,7 +179,7 @@ public class UserServiceImpl implements UserService {
 			userRepository.delete(userEntity);
 			return;
 		}
-		throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage());
+		throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage(), HttpStatus.FORBIDDEN);
 	}
 
 	@Override
@@ -217,13 +189,10 @@ public class UserServiceImpl implements UserService {
 		boolean isAdminOrSuperAdmin = userRequester.getRole().stream().anyMatch(
 				role -> role.getRoleName().equals(RoleName.ADMIN) || role.getRoleName().equals(RoleName.SUPER_ADMIN));
 		if (!isAdminOrSuperAdmin)
-			throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage());
+			throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage(), HttpStatus.FORBIDDEN);
 		Page<UserEntity> userPage = userRepository.findAll(pagerequest);
 		List<UserEntity> users = userPage.getContent();
 		return utils.mapToLists(users, UserDto.class);
-//		  return users.stream()
-//	                .map(user -> utils.mapToDto(user, UserDto.class))
-//	                .collect(Collectors.toList());
 	}
 
 	@Override
@@ -234,16 +203,146 @@ public class UserServiceImpl implements UserService {
 				.anyMatch(roleAuth -> roleAuth.getRoleName().equals(RoleName.ADMIN)
 						|| roleAuth.getRoleName().equals(RoleName.SUPER_ADMIN));
 		if (!isAdminOrSuperAdmin)
-			throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage());
+			throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage(), HttpStatus.FORBIDDEN);
 		RoleEntity roleEntity = roleRepository.findByRoleName(role);
 		if (roleEntity == null)
-			throw new UserException(ErrorMessages.NO_SCOPE_FOUND.getErrorMessage());
+			throw new UserException(ErrorMessages.NO_SCOPE_FOUND.getErrorMessage(), HttpStatus.NOT_FOUND);
 		Page<UserEntity> usersByRole = userRepository.findByRole(roleEntity, pagerequest);
 		List<UserEntity> userEntity = usersByRole.getContent();
 		if (userEntity.isEmpty())
-			throw new UserException(ErrorMessages.NO_USER_WITH_SCOPE.getErrorMessage() + role);
+			throw new UserException(ErrorMessages.NO_USER_WITH_SCOPE.getErrorMessage() + role, HttpStatus.NOT_FOUND);
 
 		return utils.mapToLists(userEntity, UserDto.class);
 	}
 
+	@Override
+	public UserDto saveNewPassword(String email, String newPasswords) {
+		UserEntity userEntity = userRepository.findByEmail(email);
+		if (userEntity == null)
+			throw new UserException(ErrorMessages.NO_SCOPE_FOUND.getErrorMessage(), HttpStatus.NOT_FOUND);
+
+		if (bCryptPasswordEncoder.matches(newPasswords, userEntity.getEncryptePassword())) {
+			throw new UserException("It's the same last password", HttpStatus.BAD_REQUEST);
+		}
+		userEntity.setEncryptePassword(bCryptPasswordEncoder.encode(newPasswords));
+		UserEntity savenewpass = userRepository.save(userEntity);
+
+		return utils.mapToDto(savenewpass, UserDto.class);
+	}
+
+	@Override
+	public UserDto updatePassword(String id, UpdatePasswordRequest updatePasswordRequest, String email) {
+		UserEntity userEntity = checkUserAuthorization(id, email);
+
+		if (!bCryptPasswordEncoder.matches(updatePasswordRequest.getLastPassword(), userEntity.getEncryptePassword())) {
+			throw new UserException("last password is false", HttpStatus.BAD_REQUEST);
+		}
+		if (bCryptPasswordEncoder.matches(updatePasswordRequest.getNewPassword(), userEntity.getEncryptePassword())) {
+			throw new UserException("Le nouveau mot de passe ne peut pas être le même que l'ancien mot de passe.",
+					HttpStatus.BAD_REQUEST);
+		}
+		if (updatePasswordRequest.getNewPassword() == null || updatePasswordRequest.getNewPassword().isEmpty()) {
+			throw new UserException("new pasword can't be empty.", HttpStatus.BAD_REQUEST);
+		}
+		userEntity.setEncryptePassword(bCryptPasswordEncoder.encode(updatePasswordRequest.getNewPassword()));
+		UserEntity updateNewPass = userRepository.save(userEntity);
+
+		return utils.mapToDto(updateNewPass, UserDto.class);
+	}
+
+	@Override
+	public void modifyUserImage(String id, String email, MultipartFile image) throws Exception {
+		UserEntity userEntity = checkUserAuthorization(id, email);
+		String imageName = utils.saveImage(image);
+		updateUserImage(imageName, userEntity);
+	}
+
+	@Override
+	public void deleteUserImage(String id, String email) {
+		UserEntity userEntity = checkUserAuthorization(id, email);
+		String oldImageName = userEntity.getUserImage();
+		if (oldImageName != null) {
+			Utils.deleteImage(oldImageName);
+			userEntity.setUserImage(null);
+			userRepository.save(userEntity);
+		} else {
+			throw new UserException(ErrorMessages.NO_IMAGE_FOUND.getErrorMessage(), HttpStatus.NOT_FOUND);
+		}
+	}
+
+	private UserEntity checkUserAuthorization(String id, String email) throws UserException {
+		UserEntity userEntity = userRepository.findByUserId(id);
+		UserEntity userRequester = userRepository.findByEmail(email);
+		if (userEntity == null) {
+			throw new UserException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage(), HttpStatus.NOT_FOUND);
+		}
+		if (userRequester == null) {
+			throw new UserException(ErrorMessages.NO_AUTH_FOUND.getErrorMessage(), HttpStatus.FORBIDDEN);
+		}
+		boolean isOwner = userEntity.getEmail().equals(email);
+		if (!isOwner) {
+			throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage(), HttpStatus.FORBIDDEN);
+		}
+		return userEntity;
+	}
+
+	private void updateUserImage(String images, UserEntity userEntity) {
+		if (images != null && !images.equals(userEntity.getUserImage())) {
+			String oldImageName = userEntity.getUserImage();
+			if (oldImageName != null) {
+				Utils.deleteImage(oldImageName);
+			}
+			userEntity.setUserImage(images);
+			userRepository.save(userEntity);
+		}
+	}
 }
+
+//@Override
+//public UserDto updateUser(String userId, UserDto userDto, String email) {
+//	UserEntity userEntity = userRepository.findByUserId(userId);
+//	if (userEntity == null)
+//		throw new UserException(ErrorMessages.NO_RECORD_FOUND.getErrorMessage(), HttpStatus.NOT_FOUND);
+//
+//	// check le email de user authentifié
+//	UserEntity userRequester = userRepository.findByEmail(email);
+//	if (userRequester == null)
+//		throw new UserException(ErrorMessages.NO_AUTH_FOUND.getErrorMessage(), HttpStatus.FORBIDDEN);
+//
+//	// Vérification si c'est le créateur de l'annonce
+//	boolean isOwner = userEntity.getEmail().equals(email);
+//
+//	// Si l'utilisateur n'est pas le créateur il ne peut maj l'utilisateur
+//	if (!isOwner) {
+//		throw new UserException(ErrorMessages.NO_AUTORIZ_REQUEST.getErrorMessage(), HttpStatus.FORBIDDEN);
+//	}
+//
+//	// Vérification des champs obligatoires
+//	if (userDto.getFirstName() == null || userDto.getFirstName().isEmpty())
+//		throw new UserException(ErrorMessages.MISSING_REQUIRED_FIELD.getErrorMessage(), HttpStatus.BAD_REQUEST);
+//
+//	if (userDto.getLastName() == null || userDto.getLastName().isEmpty())
+//		throw new UserException(ErrorMessages.MISSING_REQUIRED_FIELD.getErrorMessage(), HttpStatus.BAD_REQUEST);
+//
+//	if (userDto.getPassword() != null && !userDto.getPassword().isEmpty()) {
+//		userEntity.setEncryptePassword(bCryptPasswordEncoder.encode(userDto.getPassword()));
+//	}
+//
+//	// si user entre une nvll image dans la modification, on supprime l'image existe
+//	// en server et on persist la nouvelle
+//	if (userDto.getUserImage() != null && !userDto.getUserImage().equals(userEntity.getUserImage())) {
+//		String oldImageName = userEntity.getUserImage();
+//
+//		if (oldImageName != null) {
+//			utils.setImageDir("/userImage/");
+//			Utils.deleteImage(oldImageName);
+//		}
+//	}
+//	userEntity.setUserImage(userDto.getUserImage());
+//	userEntity.setTel(userDto.getTel());
+//	userEntity.setFirstName(userDto.getFirstName());
+//	userEntity.setLastName(userDto.getLastName());
+//	UserEntity userUpdated = userRepository.save(userEntity);
+//	return utils.mapToDto(userUpdated, UserDto.class);
+//
+//}

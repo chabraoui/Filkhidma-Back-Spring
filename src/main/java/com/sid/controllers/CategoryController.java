@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -58,7 +59,7 @@ public class CategoryController {
 		try {
 			cat = CategoryName.valueOf(categoryName.toUpperCase());
 		} catch (IllegalArgumentException e) {
-			throw new CategoryException(ErrorMessages.CAT_Not_FOUND.getErrorMessage());
+			throw new CategoryException(ErrorMessages.CAT_Not_FOUND.getErrorMessage(),HttpStatus.NOT_FOUND);
 		}
 
 		CategoryDto catDto = categoryService.getCategory(cat);
@@ -68,16 +69,16 @@ public class CategoryController {
 	@PostMapping
 	public CategoryResponse createCategory(@RequestBody CategoryRequest categoryRequest, Principal principal) {
 		if (categoryRequest.getCategoryName() == null || categoryRequest.getCategoryName().isEmpty()) {
-			throw new CategoryException(ErrorMessages.MISSING_REQUIRED_FIELD.getErrorMessage());
+			throw new CategoryException(ErrorMessages.MISSING_REQUIRED_FIELD.getErrorMessage(),HttpStatus.BAD_REQUEST);
 		}
 		CategoryName cat;
 		try {
 			cat = CategoryName.valueOf(categoryRequest.getCategoryName().toUpperCase());
 		} catch (IllegalArgumentException e) {
-			throw new CategoryException(ErrorMessages.CAT_Not_FOUND.getErrorMessage());
+			throw new CategoryException(ErrorMessages.CAT_Not_FOUND.getErrorMessage(),HttpStatus.NOT_FOUND);
 		}
 		if (categoryService.existeCategory(cat)) {
-			throw new CategoryException("La catégorie '" + cat + "' existe déjà.");
+			throw new CategoryException("La catégorie '" + cat + "' existe déjà.",HttpStatus.NOT_FOUND);
 		}
 		CategoryDto catDto = utils.mapToDto(categoryRequest, CategoryDto.class);
 		CategoryDto addCatDto = categoryService.addCategory(catDto, principal.getName());
@@ -106,7 +107,7 @@ public class CategoryController {
 		try {
 			cat = CategoryName.valueOf(categoryName.toUpperCase());
 		} catch (IllegalArgumentException e) {
-			throw new CategoryException(ErrorMessages.CAT_Not_FOUND.getErrorMessage());
+			throw new CategoryException(ErrorMessages.CAT_Not_FOUND.getErrorMessage(),HttpStatus.NOT_FOUND);
 		}
 		categoryService.removeCategory(cat, principal.getName());
 	}

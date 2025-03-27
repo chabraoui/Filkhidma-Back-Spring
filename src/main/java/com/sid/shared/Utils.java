@@ -14,10 +14,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sid.responses.AnnonceResponse;
-import com.sid.responses.RoleResponse;
-import com.sid.responses.UserResponse;
-import com.sid.shared.dto.UserDto;
+import com.sid.shared.dto.*;
+import com.sid.entity.*;
+import com.sid.services.UserLoginMapper;
 
 @Component
 public class Utils {
@@ -25,6 +24,11 @@ public class Utils {
 	private final String ALPHABET = "0123456789ABCDEFGHIJKLMNOPQERSTUVWXYZabcdefjhijklmnopqrstuvwxyz";
 	private static String IMAGE_DIR = "/annonceImage/";
 	private final ModelMapper modelMapper = new ModelMapper();
+	private final UserLoginMapper userMapper = UserLoginMapper.INSTANCE;
+
+	public UserDto getUserDto(UserEntity userEntity) {
+		return userMapper.toDto(userEntity);
+	}
 
 	public void setImageDir(String newImageDir) {
 		IMAGE_DIR = newImageDir;
@@ -83,6 +87,20 @@ public class Utils {
 	}
 
 	public <T> T mapToDto(Object entity, Class<T> dtoClass) {
+//	    // Configuration pour ignorer les propriétés problématiques
+//	    modelMapper.getConfiguration()
+//	        .setAmbiguityIgnored(true)
+//	        .setPropertyCondition(context -> {
+//	            // Ignorer les propriétés spécifiques
+//	             if (context.getSourceType().equals(UserEntity.class) && context.getDestinationType().equals(UserDto.class)) {
+//	                return !context.getMapping().getLastDestinationProperty().getName().equals("annonces");
+//	            }
+//	            if (context.getSourceType().equals(AnnonceEntity.class) && context.getDestinationType().equals(AnnonceDto.class)) {
+//	                return !context.getMapping().getLastDestinationProperty().getName().equals("user");
+//	            }
+//	            return true;
+//	        });
+
 		return modelMapper.map(entity, dtoClass); // Conversion vers DTO
 	}
 
@@ -90,6 +108,8 @@ public class Utils {
 		return entities.stream().map(entity -> modelMapper.map(entity, dtoClass)) // Mapper chaque entité vers le DTO
 				.collect(Collectors.toList()); // Collecter les résultats dans une liste
 	}
+
+}
 
 //	public UserResponse mapUserDtoToUserResponse(UserDto userDto) {
 //		UserResponse userResponse = modelMapper.map(userDto, UserResponse.class);
@@ -104,8 +124,6 @@ public class Utils {
 //		System.out.println(userResponse);
 //		return userResponse;
 //	}
-
-}
 
 //public List<AnnonceDto> mapToList(List<AnnonceEntity> entities) {
 //return modelMapper.map(entities, new TypeToken<List<AnnonceDto>>() {

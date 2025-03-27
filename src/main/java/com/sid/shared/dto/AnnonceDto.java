@@ -2,11 +2,8 @@ package com.sid.shared.dto;
 
 import java.io.Serializable;
 import java.util.Date;
-
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
 import lombok.*;
-
 
 @Data
 @AllArgsConstructor
@@ -27,6 +24,7 @@ public class AnnonceDto implements Serializable {
 	@JsonIgnoreProperties(value = "annonces")
 	private CategoryDto category;
 	private VilleDto ville;
+	@JsonIgnoreProperties(value = "annonces")
 	private UserDto user;
 
 }
